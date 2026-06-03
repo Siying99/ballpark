@@ -48,10 +48,19 @@
 # ============================================================
 
 name: arss_aggregate
-kind: aggregate-block-system            # SPECULATIVE container kind (see block flag above)
+kind: sequence-space-block              # SPECULATIVE container kind (see block flag above);
+                                        # renamed from `aggregate-block-system` per Matsya
+                                        # round-11 (Check 6) -- aligns with SSJ literature.
 horizon: infinite-stationary            # MIT-shock transition around stochastic steady state
                                         # (consistent with dolo-plus-draft.yaml; see
                                         #  bellman-excerpt.md section 13.3)
+
+settings:
+  T: 300                                # sequence truncation length (quarters): the numerical
+                                        # horizon at which the terminal/boundary conditions of
+                                        # Block F (E.16) are imposed. Added per Matsya round-11
+                                        # (Issue 4.1). `infinite-stationary` above is the
+                                        # *conceptual* horizon; T is its numerical truncation.
 
 
 # ============================================================
@@ -129,6 +138,8 @@ symbols:
     psi_N:     '@in Rpos'   # labour-disutility weight
     sigma:     '@in Rpos'   # CRRA (enters u'(C) in wage PC)
     r_ss:      '@in Rany'   # steady-state real rate = 1/beta_star - 1
+    d_ss:      '@in Rpos'   # steady-state real dividend = 1 - 1/mu  (terminal block)
+    p_ss:      '@in Rpos'   # steady-state stock price = d_ss/r_ss   (terminal p[T])
 
 
 # ============================================================
@@ -144,31 +155,52 @@ blocks:
   inputs:  [P_H, Exch, iota, iota_s, pi, B]
   outputs: [P, P_F, P_Hs, Q, r, r_star]
   equations:
+    # Each equation is tagged `helper` (an identity that DEFINES an output
+    # from inputs) or `target` (an equilibrium residual the GE solve drives
+    # to zero). Role tags added per Matsya round-11 (Issue 7).
+    # helper (defines P):
     E.3_cpi: |
       # CES consumer price index (paper eq. (4)).
       P^(1 - eta) = alpha * P_F^(1 - eta) + (1 - alpha) * P_H^(1 - eta)
+    # helper (defines P_F):
     E.4_lop_import: |
       # Law of one price, imports, perfect pass-through (paper eq. (17)).
       P_F = Exch
+    # helper / DIAGNOSTIC (defines P_Hs):
     E.5_lop_export: |
-      # Law of one price, exports (paper eq. (17)).
+      # Law of one price, exports (paper eq. (17)). P_Hs is a DIAGNOSTIC
+      # output: the export-price channel is inlined as (P_H / Exch) in E.2,
+      # so P_Hs has no downstream consumer. Kept for paper-faithful notation
+      # (the paper's consumption-functional argument uses P_Hs / P_star).
+      # Per Matsya round-11 (Issue 2.3): annotated as diagnostic, not dropped.
       P_Hs = P_H / Exch
+    # helper (defines Q):
     E.6_rer: |
       # Real exchange rate (paper eq. (6)); P_star = 1 under RoW policy.
       Q = Exch / P
+    # target (constrains Q):
     E.7_uip: |
       # Real uncovered interest parity (paper eq. (7)).
       1 + r = (1 + r_star) * Q[+1] / Q
-    # Real-rate definitions tying nominal rates to inflation:
+    # helper (defines pi):
+    pi_def: |
+      # CPI inflation definition. Added per Matsya round-11 (Issue 1.1):
+      # E.11 consumes pi[+1] but no equation assigned pi. The paper treats
+      # pi_{t+1} as shorthand for P_{t+1}/P_t - 1; the YAML makes it explicit.
+      pi = P / P[-1] - 1
+    # helper (defines r -- the Fisher equation):
     rdef_home: |
       1 + r = (1 + iota) * P / P[+1]          # paper, section 1.3
+    # helper (defines r_star):
     rdef_row: |
       1 + r_star = (1 + iota_s)               # P_star=1 => r_star = iota_star
-    # workaround: whether real-UIP (E.7) is a within-period or a
-    # between-period (twister-like) equation is one of the dolo-plus
-    # modelling choices flagged as open in bellman-excerpt.md section 13.1.
-    # Encoded here as a within-system equation over the sequence {Q_t};
-    # the Q[+1] lead is the forward-looking term. See section 13.5.
+    # resolved (Matsya round-11, Check 3): real-UIP (E.7) is correctly a
+    # WITHIN-SYSTEM equation over the sequence {Q_t}, NOT a between-period
+    # connector. In sequence space all forward-looking conditions (E.7, E.9,
+    # E.11, E.15) are per-period residuals; the between-period-connector
+    # reading would apply only if Q were a household-level perch state, which
+    # it is not (Q is an aggregate price). This supersedes the "open question"
+    # framing in bellman-excerpt.md section 13.1.
 
 
 # ============================================================
@@ -183,16 +215,25 @@ blocks:
   inputs:  [W, N, P, P_H, Y]
   outputs: [P_H, Y, d, w]
   equations:
+    # target (constrains P_H vs W):
     E.8_pricing: |
       # Monopolistic price setting at constant markup (paper eq. (14)).
+      # Decision (Matsya round-11, Issue 8): kept as a TARGET with both P_H
+      # and W as unknowns (Option A -- the standard SSJ level-iteration form).
+      # The alternative (eliminate P_H via E.8, 3 unknowns / 3 targets) is
+      # REJECTED here: it changes the solver architecture for no economic gain
+      # and is less standard. Revisit only if a 3-unknown form is needed.
       P_H = mu * W
+    # helper (defines Y):
     E.10_production: |
       # Linear technology Y = N (paper eq. (13)).
       Y = N
+    # helper (defines d):
     E.13_dividend: |
       # Real dividends = profit share of real income (paper eqs. (15),(29)).
       # Export currency-exposure term is zero under LOP (paper eq. (17)).
       d = (1 - 1 / mu) * (P_H / P) * Y
+    # helper (defines w -- the price the household block consumes):
     real_wage: |
       # Real wage consumed by the household block (paper eq. (28)):
       #   (W/P) N = (1/mu) (P_H/P) Y. With Y=N this gives w = (1/mu)(P_H/P).
@@ -211,14 +252,21 @@ blocks:
   inputs:  [N, w, C, pi_w, W]
   outputs: [pi_w, W]
   equations:
+    # target (constrains the wage path; consumes household C via u'(C)):
     E.9_wage_pc: |
       # Wage Phillips curve (paper eq. (18)).
       #   v'(N) = psi_N * N^varphi          (labour disutility, paper eq. (2))
       #   u'(C) = C^(-sigma)                (CRRA marginal utility)
+      # NB: C is the AGGREGATE consumption from the household block; the
+      # C -> E.9 wire is declared in openha-ge-draft.yaml (Matsya Issue 2.2).
       pi_w = kappa_w * ( (psi_N * N^varphi) / ( (1 / mu_w) * w * C^(-sigma) ) - 1 )
              + beta * pi_w[+1]
+    # helper (defines pi_w from the W path):
     wage_inflation_def: |
       # Definition of nominal wage inflation linking W across periods.
+      # Per Matsya round-11 (Issue 5.1): this is a HELPER, so pi_w is a
+      # deterministic function of W and is NOT an independent unknown. The
+      # GE unknowns iterate on the level W (Option A); pi_w is recovered here.
       pi_w = W / W[-1] - 1
 
 
@@ -282,28 +330,42 @@ blocks:
   inputs:  [A, p, d, r, P_H, P, Y, C]
   outputs: [nfa, NX, p]
   equations:
+    # helper (defines NX):
     NX_def: |
       # Real net exports (paper, section 1.2).
       NX = (P_H / P) * Y - C
+    # helper (defines nfa) + CONSISTENCY CHECK (the current-account flow):
     E.14_nfa: |
       # NFA definition and current-account identity (paper eqs. (22)-(23)).
-      nfa = A - p
-      nfa - nfa[-1] = NX + r[-1] * nfa[-1]
+      # Per Matsya round-11 (Issue 5.3): the first line is the DEFINITION of
+      # nfa; the second (current-account flow) is REDUNDANT by Walras's law
+      # given E.2 + household budget constraints, so it is a CONSISTENCY
+      # CHECK, not an independent target. The GE solve must not count it as a
+      # degree of freedom.
+      nfa = A - p                                  # definition
+      nfa - nfa[-1] = NX + r[-1] * nfa[-1]         # consistency check (Walras-redundant)
+    # target (constrains the stock-price path; forward-looking, needs p[T]):
     E.15_stock_pricing: |
       # Real stock price = no-arbitrage present value (paper eq. (7), 2nd equality).
       1 + r = (p[+1] + d[+1]) / p
   terminal_conditions:
     E.16_terminal: |
-      # Equilibrium-selection / transversality (paper, section 4.1).
+      # Equilibrium-selection / transversality (paper, section 4.1), imposed
+      # at the truncation horizon T (see top-level `settings: T`).
       #   nfa_infinity = 0   (zero long-run net foreign assets)
       #   Q_infinity   = Q_ss = 1   (real exchange rate returns to steady state)
+      #   p_T          = d_ss / r_ss (stock at steady-state valuation) -- added
+      #     per Matsya round-11 (Issue 4.2): E.15 is forward-looking and needs
+      #     a terminal p to close. d_ss/r_ss = 0.04123/0.01010 ~= 4.082.
       nfa[T] = 0
       Q[T] = 1
-    # unresolved: horizon-end (T -> infinity) boundary conditions in a
+      p[T] = d_ss / r_ss
+    # unresolved: horizon-end boundary conditions at the truncation T in a
     # stationary infinite-horizon MIT-shock problem are not a canonical
     # dolo-plus construct (same spec gap as the Benhabib terminal-boundary
-    # item). Encoded as `terminal_conditions` here; revisit when the spec
-    # adds a sequence-space boundary idiom. See bellman-excerpt.md section 13.5.
+    # item; Matsya round-11 Issue 4.3 confirms no idiom exists). Encoded as
+    # `terminal_conditions` here; revisit when the spec adds a sequence-space
+    # boundary idiom. See bellman-excerpt.md section 13.5.
 
 
 # ============================================================
@@ -326,6 +388,14 @@ consumption_functional:
     M:   'partial C / partial ((P_H/P) Y)'    # intertemporal MPC matrix (paper eq. (A.67))
     M_r: '(1 + r) * partial C / partial r'    # interest-rate Jacobian
   assumption: 'M >= 0 (paper Assumption 1; maintained, not re-derived)'
+  # unresolved (SPECULATIVE, Matsya round-11 Issue 2.4): the household YAML
+  # defines INDIVIDUAL policies c(m,e), psi(m,e); producing the AGGREGATES
+  #   C = integral c dD,  A = integral a^p dD
+  # requires a distribution -> aggregation -> Jacobian pipeline that has no
+  # canonical dolo-plus syntax. The `produces: [C, A]` declaration is the
+  # contract; the aggregation step itself is implicit (the SSJ toolkit / a
+  # HARK instantiation would supply it). Canonical record: bellman-excerpt.md
+  # section 13.5.
 
 
 # ============================================================
@@ -340,19 +410,27 @@ consumption_functional:
 # price/exchange-rate paths that clear the home-goods market and satisfy
 # real UIP, taking the household consumption functional as given.
 # ------------------------------------------------------------
+# Partition fixed per Matsya round-11 (Issue 5.1, Option A): iterate on the
+# 4 LEVEL sequences {Y, P_H, Exch, W}. pi_w is NOT an unknown -- it is a
+# deterministic helper of W (wage_inflation_def), so listing it here too
+# over-parameterised the Newton loop. The 4 unknowns are matched by 4
+# per-period targets; the terminal/boundary block (E.16) supplies the
+# boundary values that close the forward-looking leads (it is NOT a
+# per-period target). Result: a well-posed 4*T x 4*T square system.
 unknowns:
   - Y          # output path
   - P_H        # home-good price path
   - Exch       # nominal exchange-rate path
-  - W          # nominal wage path
-  - pi_w       # wage-inflation path
+  - W          # nominal wage path  (pi_w recovered from W via wage_inflation_def)
 
-targets:
+targets:                # 4 per-period equilibrium residuals
   - E.2_clearing       # home-goods market clears
   - E.7_uip            # real UIP holds
-  - E.8_pricing        # firm pricing
+  - E.8_pricing        # firm pricing (P_H vs W; see Issue-8 decision in `firms`)
   - E.9_wage_pc        # wage Phillips curve
-  - E.16_terminal      # terminal conditions (nfa_inf=0, Q_inf=Q_ss)
+
+boundary_conditions:    # NOT per-period targets; imposed at the truncation T
+  - E.16_terminal      # nfa[T]=0, Q[T]=1, p[T]=d_ss/r_ss
 
 
 # ============================================================
@@ -376,9 +454,13 @@ calibration:
   mu:        1.043       # gross price markup                         [paper Table 2]
   mu_w:      1.0         # wage markup (static under union objective)  [paper eq. (18)]
   theta_w:   0.938       # wage Calvo parameter                        [paper Table 2]
-  kappa_w:   0.00408     # = (1 - beta*theta_w)(1 - theta_w)/theta_w
+  kappa_w:   0.006268    # = (1 - beta*theta_w)(1 - theta_w)/theta_w
                          #   = (1 - 0.965*0.938)(1 - 0.938)/0.938
-                         #   = (0.09483)(0.062)/0.938 = 0.006268 ... see note below
+                         #   = (0.09483)(0.062)/0.938 = 0.006268
+  # FIXED per Matsya round-11 (Issue 1.2): the previously declared value
+  # (0.00408) contradicted this formula and its own arithmetic. Reconciled to
+  # the formula value 0.006268 (the standard Calvo wage-PC slope, paper eq.
+  # (18); formula recorded in bellman-excerpt.md section 1.5).
   # note: kappa_w is a derived parameter; the value above uses beta=0.965,
   # theta_w=0.938. unresolved: whether kappa_w should be a free calibration
   # entry or computed from (beta, theta_w) inside the block depends on the
@@ -397,6 +479,10 @@ calibration:
   # --- Steady-state real rate ---
   r_ss:      0.01010     # = 1/beta_star - 1 = 1/0.990 - 1            [paper, section 5.2]
 
+  # --- Derived steady-state values used by the terminal block (Issue 4.2) ---
+  d_ss:      0.04123     # = (1 - 1/mu) (P_H/P) Y at the ss = 1 - 1/1.043
+  p_ss:      4.082       # = d_ss / r_ss = 0.04123/0.01010  (terminal p[T])
+
   # --- Rest-of-world steady-state levels (normalisations) ---
   C_star:    1.0         # RoW consumption C* (paper, section 4.2 normalisation)
 
@@ -406,6 +492,7 @@ calibration:
   #   P_Hss = P_Fss = P_ss = P_Hs_ss = Exch_ss = Q_ss = 1
   #   Y_ss = N_ss = C_ss = C_star = 1 ; nfa_ss = 0 ; r_ss as above
   #   w_ss = 1/mu = 0.9588 ; d_ss = (1 - 1/mu) = 0.04123
+  #   p_ss = d_ss/r_ss = 4.082  (no-arbitrage stock value, paper eq. (7))
 
 
 # ============================================================

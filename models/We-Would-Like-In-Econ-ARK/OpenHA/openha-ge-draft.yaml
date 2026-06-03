@@ -35,7 +35,10 @@
 # ============================================================
 
 name: openha_ge
-kind: ge-composition                    # SPECULATIVE container kind (see block flag)
+kind: ge-fixed-point                    # SPECULATIVE container kind (see block flag);
+                                        # renamed from `ge-composition` per Matsya round-11
+                                        # (Check 6) -- emphasises the composition is a fixed
+                                        # point, not a sequential pipeline.
 horizon: infinite-stationary            # MIT-shock transition around stochastic steady state
 
 
@@ -70,7 +73,7 @@ components:
 
   aggregate:
     source: aggregate-draft.yaml
-    kind: aggregate-block-system
+    kind: sequence-space-block          # renamed per Matsya round-11 (Check 6)
     description: |
       Aggregate / GE closure: prices & exchange rate (Block A, E.3-E.7),
       firms/production/dividends (Block B, E.8/E.10/E.13), wage Phillips
@@ -91,12 +94,15 @@ components:
 # ------------------------------------------------------------
 wiring:
   household_to_aggregate:
-    # household aggregate consumption enters goods-market clearing (E.2)
-    # and net exports (NX in Block F); aggregate assets enter NFA (E.14).
+    # household aggregate consumption enters goods-market clearing (E.2),
+    # net exports (NX in Block F), AND the wage Phillips curve (E.9, via the
+    # marginal-utility term C^(-sigma)); aggregate assets enter NFA (E.14).
     - from: household.C
       to:   aggregate.goods_market.E.2_clearing      # via input C
     - from: household.C
       to:   aggregate.nfa_ca.NX_def                  # via input C
+    - from: household.C
+      to:   aggregate.wage_phillips.E.9_wage_pc      # via input C (added: Matsya Issue 2.2)
     - from: household.A
       to:   aggregate.nfa_ca.E.14_nfa                # via input A
   aggregate_to_household:
@@ -107,8 +113,9 @@ wiring:
       to:   household.w
     - from: aggregate.firms.E.10_production           # N (= Y)
       to:   household.N
-    - from: aggregate.prices_fx.E.7_uip               # r (real rate via UIP/rule)
-      to:   household.r
+    - from: aggregate.prices_fx.rdef_home             # r via the Fisher eq (fixed: Matsya
+      to:   household.r                               #   Issue 2.1; r is NOT set by E.7_uip,
+                                                      #   which is a target constraining Q)
 
 
 # ============================================================

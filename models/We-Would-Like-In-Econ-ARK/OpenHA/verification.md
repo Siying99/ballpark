@@ -100,3 +100,43 @@ This round implements the follow-up step that was deferred in Round 9: encoding 
 - **Encoding the Section-5 inertial Taylor rule (paper eq. (20)) and the other Section-5 extensions.** These are out of the baseline scope (paper §§2–4); only the baseline constant-real-rate rule E.11 is encoded. Flagged inline in the `monetary` block.
 
 **Honest status / open item.** dolo-plus has no canonical syntax for an aggregate sequence-space block or for HA ⊕ aggregate GE composition (the same spec gap recorded for the Benhabib `dolo-plus-dynasty.yaml`). The container keywords are therefore **SPECULATIVE** and flagged block-level in both new YAMLs, with a canonical cross-document record in `bellman-excerpt.md` §13.5. The economics (the 16 equations) is final and paper-grounded; only the container syntax is provisional. The **Matsya `evaluate` pass on the aggregate block remains to be run** (continue session `topics2026-siying99-ballpark`); when run, it will most likely challenge the SPECULATIVE container kinds and the real-UIP / terminal-condition idioms, and the resulting accept/edit/reject judgments should be recorded as a Round 11 entry here. Both new YAMLs were checked to parse as YAML (`yaml.safe_load_all`).
+
+## Round 11 — Matsya `evaluate` pass on the aggregate block (June 2026)
+
+This round runs the Matsya `evaluate` pass deferred at the end of Round 10. The two new YAMLs (`aggregate-draft.yaml`, `openha-ge-draft.yaml`) plus the consolidated 16-equation system (`bellman-excerpt.md` §7) were bundled into a single prompt and submitted to session `topics2026-siying99-ballpark` with six explicit checks (undefined symbols; dangling wires; real-UIP placement; terminal conditions; the unknowns/targets partition; container kinds). Matsya returned a structured review with 17 numbered items across the six checks plus two additional findings. Each is processed below with an explicit **accept / edit / reject** verdict; "(a)" marks Matsya's genuine-gap tag, "(b)" a dolo-plus spec gap, and the action column records what landed in the files.
+
+**Critically corrected vs. accepted.** As in Round 8, Matsya was treated as a fallible specialist, not an oracle: its economic gaps were verified against the paper before applying, and two of its *suggestions* (E.8 elimination; dropping `P_Hs`) were **rejected with reasons** rather than accepted wholesale.
+
+**Genuine gaps — accepted and fixed (verified against the paper).**
+
+| # | Matsya item | Verdict | Fix applied |
+| --- | --- | --- | --- |
+| 1.1 / 5.2 | `pi` consumed by E.11 but never defined | **Accept** | Added helper `pi_def: pi = P/P[-1] - 1` to `prices_fx`. The paper treats $\pi_{t+1}$ as shorthand for $P_{t+1}/P_t-1$; the YAML must be explicit. |
+| 1.2 | `kappa_w` value contradicts its own formula | **Accept (correction)** | The declared value `0.00408` disagreed with the formula $(1-\beta\theta_w)(1-\theta_w)/\theta_w$ and even with the arithmetic written in the same comment ($=0.006268$). Verified the formula is the standard Calvo wage-PC slope (paper eq. (18); `bellman-excerpt.md` §1.5) and reconciled the value to **0.006268**. This was a genuine bug I had introduced in Round 10. |
+| 2.1 | `r` wire points to `E.7_uip`, not its true source | **Accept** | `r` is set by the Fisher identity `rdef_home`, not by UIP (which is a *target* constraining $Q$). Re-pointed the wire in `openha-ge-draft.yaml` to `aggregate.prices_fx.rdef_home`. |
+| 2.2 | `C → E.9_wage_pc` wire missing | **Accept** | Aggregate `C` enters the wage PC via the marginal-utility term $C^{-\sigma}$. Added the missing `household.C → aggregate.wage_phillips.E.9_wage_pc` wire. |
+| 4.1 | Truncation horizon `T` undeclared | **Accept** | E.16 references `nfa[T]`, `Q[T]` but `T` was never set. Added top-level `settings: T: 300` (quarters), the numerical truncation of the conceptual `infinite-stationary` horizon. |
+| 4.2 | Terminal value for stock price `p` missing | **Accept** | E.15 is forward-looking and needs `p[T]` to close. Added `p[T] = d_ss / r_ss = 0.04123/0.01010 ≈ 4.082` (the no-arbitrage steady-state valuation, paper eq. (7)). Declared `d_ss`, `p_ss` as derived calibration values. |
+| 5.1 | `W` and `pi_w` both unknowns but linked by an identity | **Accept (Option A)** | `wage_inflation_def` makes `pi_w` a deterministic function of `W`, so listing both over-parameterised the Newton loop. Adopted Matsya's Option A: iterate on the four *levels* `{Y, P_H, Exch, W}`; `pi_w` recovered as a helper. Result: a well-posed 4×T square system. |
+
+**Spec gaps — accepted as flags (no fix exists; recorded in §13.5).**
+
+| # | Matsya item | Verdict | Action |
+| --- | --- | --- | --- |
+| 2.4 | `C, A` aggregation pipeline ($C=\int c\,dD$) is implicit | **Accept (flag)** | No canonical dolo-plus syntax for distribution → aggregation → Jacobian. Added a `# unresolved (SPECULATIVE)` note at the `consumption_functional` block and a new bullet in `bellman-excerpt.md` §13.5. |
+| 4.3 | `terminal_conditions` not a canonical construct | **Accept (flag)** | Kept the encoding; already flagged. Also split E.16 out of per-period `targets` into a separate `boundary_conditions` list for clarity. |
+| 6 | Container kinds are speculative | **Accept + rename** | Confirmed no canonical idiom. Adopted Matsya's naming suggestions: `aggregate-block-system → sequence-space-block` (aligns with SSJ literature) and `ge-composition → ge-fixed-point` (emphasises fixed point, not pipeline). Still flagged SPECULATIVE; renames propagated to both YAMLs, `bellman-excerpt.md` §13.5, and `AGENTS.md`. |
+
+**Verdict confirmations and annotations.**
+
+- **Check 3 (real-UIP placement) — Accept verdict; question resolved.** Matsya confirmed E.7 is correctly a *within-system* equation over `{Q_t}` for the sequence-space solve (all forward-looking conditions are per-period residuals; the between-period reading would apply only if `Q` were a household perch state, which it is not). Upgraded the inline `prices_fx` comment from "open question" to "resolved," and moved the item from "flagged" to "resolved" in §13.5. This closes the modelling question left open in §13.1.
+- **Issue 5.3 (E.14 current-account redundant) — Accept (edit).** By Walras's law the current-account flow follows from E.2 + household budget constraints, so it is not an independent target. Kept `nfa = A - p` as the definition and annotated the flow line as a **consistency check** (not a degree of freedom).
+- **Issue 7 (helper vs target roles) — Accept (edit).** Added explicit `helper` / `target` role tags as comments on every equation in the aggregate blocks, so the partition between identities and zeroed residuals is legible.
+- **Issue 1.3 (`mu_w` redundant at 1.0) — Accept (no change).** Matsya agreed `mu_w=1.0` is a harmless no-op kept for generality (paper eq. (18) carries it in the general case). No action.
+
+**Rejected (Matsya's suggestion declined, with reasons).**
+
+- **Issue 8 — eliminate `P_H` from unknowns (3×3 instead of 4×4).** *Rejected.* Matsya itself notes Option A (4 unknowns, E.8 as a target) is "more standard in SSJ implementations." Collapsing to 3 unknowns by using E.8 to substitute out `P_H` changes the solver architecture for no economic gain and is less faithful to the standard level-iteration form. Kept E.8 as a target with `P_H` an unknown; documented the decision inline in the `firms` block.
+- **Issue 2.3 — drop `P_Hs` and E.5.** *Rejected (edit instead).* Although `P_Hs` has no downstream consumer (the export-price channel is inlined as `(P_H/Exch)` in E.2), E.5 is paper eq. (17) and `P_Hs` is the paper's own notation for the consumption-functional argument $P_{Hs}/P^\star$. Dropping it would make the YAML less paper-faithful. Kept E.5 and **annotated `P_Hs` as a diagnostic output** instead — Matsya explicitly noted "either is defensible."
+
+**Outcome.** All seven genuine gaps fixed; three spec gaps flagged (one newly identified); the real-UIP question resolved; two Matsya suggestions rejected with reasons; container kinds renamed. Both YAMLs re-validated with `yaml.safe_load` after the edits. The economics remains paper-grounded throughout; only the container syntax stays provisional pending a canonical dolo-plus SSJ idiom. Cross-document records (`bellman-excerpt.md` §13.5, `AGENTS.md` next-tasks) updated to mark the evaluate pass complete.
