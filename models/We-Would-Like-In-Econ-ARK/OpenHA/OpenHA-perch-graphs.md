@@ -72,11 +72,11 @@ For the explicit symbol table, perch table per stage, and the FOC / InvEuler / e
 
 ---
 
-## 2. Aggregate block — 16-equation system (specified but NOT yet in YAML)
+## 2. Aggregate block — 16-equation system (now encoded in YAML)
 
 The aggregate / general-equilibrium closure of paper §§3–4 is consolidated in `bellman-excerpt.md` §7 as a 16-equation system. The diagram below shows the natural block-grouping, the data-flow between blocks, and the household-block interface (`r`, `w`, `N` flow in; `C_t` flows out via the iMPC matrix `M`).
 
-This block is **deliberately not encoded in YAML in this PR** — see [`bellman-excerpt.md`](bellman-excerpt.md) §13.1 for the rationale and the explicit follow-up plan for an `aggregate-draft.yaml`. The diagram below is the visualization of *what that follow-up YAML would need to encode*.
+As of the June 2026 follow-up PR, this block is **encoded** in [`aggregate-draft.yaml`](aggregate-draft.yaml) (the six blocks below, with equation tags E.1–E.16 matching `bellman-excerpt.md` §7), and the household↔aggregate wiring shown here is implemented in [`openha-ge-draft.yaml`](openha-ge-draft.yaml). The diagram below is therefore the visualization of *what those YAMLs encode*. The aggregate-block container syntax is SPECULATIVE (dolo-plus has no canonical aggregate sequence-space idiom) — see [`bellman-excerpt.md`](bellman-excerpt.md) §13.1 (scope history) and §13.5 (syntax workaround). The Matsya `evaluate` pass on the aggregate block is the remaining human-in-the-loop step.
 
 ```mermaid
 flowchart TB

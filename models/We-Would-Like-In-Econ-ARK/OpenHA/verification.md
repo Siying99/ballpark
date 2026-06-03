@@ -76,3 +76,27 @@ PR #73 received an instructor review (llorracc, 2026-04-27) ranking the entry as
 - **`.gitignore` conflict resolution:** the merge brought in `*.mmd` (gitignore for paper Mathpix conversions, PR #84) while the branch had already added `source/` (paper-source LaTeX); both rules were retained, with both serving the same copyright-protection purpose for different file types.
 
 These are presentation-layer changes; the formalization content of this PR (the four substantive Round 9 items above) is independent of them.
+
+## Round 10 — Aggregate-block YAML follow-up (June 2026)
+
+This round implements the follow-up step that was deferred in Round 9: encoding the aggregate / general-equilibrium block in YAML, per the blueprint in `bellman-excerpt.md` §13.1. Two files were added — `aggregate-draft.yaml` (the six-block GE closure E.1–E.16) and `openha-ge-draft.yaml` (the household ⊕ aggregate composition). Both were drafted by Cursor/Claude (the *Extract* step of the CONTRIBUTING.md "formalization iteration"); the Matsya `evaluate` pass on the aggregate block is **not yet run** and is recorded as the open item (see below and `AGENTS.md`). Because there is no Matsya output for the aggregate block yet, the accept/edit/reject discipline below is applied to the two grounded inputs that *do* exist: the §13.1 blueprint and the paper's own equations (verified against the August-2024 revision at <https://web.stanford.edu/~aauclert/ha_oe.pdf>, §§2–4 and the consolidated system of `bellman-excerpt.md` §7).
+
+**Accepted (from the §13.1 blueprint, verified against the paper).**
+
+- The six-block decomposition (a) `prices_fx` (E.3–E.7), (b) `firms` (E.8/E.10/E.13), (c) `wage_phillips` (E.9), (d) `monetary` (E.11–E.12), (e) `goods_market` (E.2), (f) `nfa_ca` (E.14–E.16). I checked each grouping against the paper's section structure (§3.1–3.9) and the consolidated table in §7; the grouping is the natural structural partition and was adopted verbatim.
+- The wiring contract: household consumes `(r, w, N)` and produces `(C, A)`; the aggregate block supplies `(r, w, N)` and consumes `(C, A)`. This is exactly the data-flow already drawn in `OpenHA-perch-graphs.md` §2, and it is consistent with the household YAML's §13.4 treatment of `w, N, r` as parameters that become inputs once wired.
+- Every equation tag `E.1`–`E.16` was kept identical to `bellman-excerpt.md` §7 so the YAML and the excerpt are cross-referenceable line-by-line.
+
+**Edited (the blueprint under-specified these; I made an explicit, paper-grounded choice and flagged it).**
+
+- **Real wage as a derived output, not a free price.** The blueprint lists `w` among the prices the household consumes but does not say where it is produced. From paper eq. (28), `(W/P)N = (1/μ)(P_H/P)Y`, so with `Y = N` the real wage is `w = (1/μ)(P_H/P)`. I added this as an explicit `real_wage` equation in the `firms` block rather than leaving `w` undetermined.
+- **Real-rate definitions.** E.7 (UIP) alone does not pin `r` to nominal rates and inflation; I added the standard `rdef_home` (`1+r = (1+ι)P/P[+1]`) and `rdef_row` (`1+r* = 1+ι*` under `P*=1`) identities to the `prices_fx` block, sourced from `bellman-excerpt.md` §1.3.
+- **`unknowns`/`targets` partition.** The blueprint does not specify the sequence-space solve partition. I adopted the standard small-open-economy HANK partition (unknowns: `Y, P_H, Exch, W, pi_w`; targets: market clearing E.2, UIP E.7, pricing E.8, wage PC E.9, terminal E.16) and flagged it inline as a modelling choice (`bellman-excerpt.md` §13.5).
+- **`kappa_w` arithmetic.** Listed as an explicit calibration value with the `(1-βθ_w)(1-θ_w)/θ_w` arithmetic shown, and flagged as a derived parameter whose value must be recomputed if `β` or `θ_w` change.
+
+**Rejected.**
+
+- **Re-stating E.1 (the consumption functional) as an aggregate-block equation.** E.1 *is* the household block; restating it in `aggregate-draft.yaml` would double-count. Instead it is recorded as a `consumption_functional` provider reference (`provider: dolo-plus-draft.yaml`, `produces: [C, A]`), with the iMPC matrices `M`, `M_r` named as the linearization objects. This keeps the household block as the single source of the consumption response (the HARK-interface bridge of §5).
+- **Encoding the Section-5 inertial Taylor rule (paper eq. (20)) and the other Section-5 extensions.** These are out of the baseline scope (paper §§2–4); only the baseline constant-real-rate rule E.11 is encoded. Flagged inline in the `monetary` block.
+
+**Honest status / open item.** dolo-plus has no canonical syntax for an aggregate sequence-space block or for HA ⊕ aggregate GE composition (the same spec gap recorded for the Benhabib `dolo-plus-dynasty.yaml`). The container keywords are therefore **SPECULATIVE** and flagged block-level in both new YAMLs, with a canonical cross-document record in `bellman-excerpt.md` §13.5. The economics (the 16 equations) is final and paper-grounded; only the container syntax is provisional. The **Matsya `evaluate` pass on the aggregate block remains to be run** (continue session `topics2026-siying99-ballpark`); when run, it will most likely challenge the SPECULATIVE container kinds and the real-UIP / terminal-condition idioms, and the resulting accept/edit/reject judgments should be recorded as a Round 11 entry here. Both new YAMLs were checked to parse as YAML (`yaml.safe_load_all`).

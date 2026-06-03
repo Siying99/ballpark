@@ -1,0 +1,415 @@
+# ============================================================
+# ARSS Aggregate Block — General-Equilibrium Closure
+# ============================================================
+# Paper: Auclert, Rognlie, Souchier, Straub (2024),
+#   "Exchange Rates and Monetary Policy with Heterogeneous Agents:
+#    Sizing up the Real Income Channel" (NBER WP 28872).
+#
+# Source of derivation: bellman-excerpt.md sections 3-4 (block-by-block
+#   aggregate closure) and section 7 (consolidated 16-equation system
+#   E.1-E.16). Block grouping and household<->aggregate wiring contract:
+#   bellman-excerpt.md section 13.1 ("What the follow-up PR should
+#   contain") and OpenHA-perch-graphs.md section 2.
+#
+# This file is the follow-up `aggregate-draft.yaml` planned in
+# bellman-excerpt.md section 13.1. It encodes the aggregate / GE
+# closure that was deliberately out-of-scope for the household-only
+# `dolo-plus-draft.yaml` (paper sections 2; bellman-excerpt.md section 8).
+#
+# Companion files:
+#   - dolo-plus-draft.yaml   household three-stage period (shocks->cons->disc)
+#   - openha-ge-draft.yaml   GE composition wiring household + aggregate
+#
+# ------------------------------------------------------------
+# BLOCK-LEVEL SCOPE / SYNTAX FLAG (read before editing)
+# ------------------------------------------------------------
+# unresolved (SPECULATIVE block-level): dolo-plus has no canonical
+# syntax for an aggregate / general-equilibrium sequence-space block
+# (a system of equilibrium conditions solved jointly for sequences,
+# rather than a household perch decomposition). This is the same
+# class of spec gap recorded for the Benhabib-Bisin-Luo (2019)
+# cross-generational layer in `dolo-plus-dynasty.yaml`, and was
+# confirmed UNRESOLVED at the dolo-plus spec level by the Matsya
+# 2026-04-27 review for related items (calibration-override families,
+# terminal-boundary blocks, period templates with state-dependent
+# parameters). The block / inputs / outputs / equations / unknowns /
+# targets layout below is therefore SPECULATIVE: keyword names and
+# nesting may need renaming once a canonical sequence-space-Jacobian
+# (SSJ) idiom appears in the dolo-plus spec. The *economics* (the 16
+# equations) is paper-grounded and final; only the *container syntax*
+# is provisional. Per CONTRIBUTING.md (line 47), this is flagged here
+# at the point of divergence rather than hidden. Canonical record:
+# bellman-excerpt.md section 13.5.
+#
+# Notation: ASCII throughout (matches dolo-plus-draft.yaml). Sequences
+# are indexed by t; t+1 / t-1 are written x[+1] / x[-1]. A trailing
+# `_star` marks rest-of-world variables. The equation tags E.1-E.16
+# match bellman-excerpt.md section 7 exactly.
+# ============================================================
+
+name: arss_aggregate
+kind: aggregate-block-system            # SPECULATIVE container kind (see block flag above)
+horizon: infinite-stationary            # MIT-shock transition around stochastic steady state
+                                        # (consistent with dolo-plus-draft.yaml; see
+                                        #  bellman-excerpt.md section 13.3)
+
+
+# ============================================================
+# Shared symbol declarations (all blocks)
+# ============================================================
+# Spaces and domains common to the aggregate system. Block-local
+# `equations` reference these symbols by name. Roles:
+#   exogenous  - driven by MIT shocks (monetary, RoW preference)
+#   from_household - supplied by dolo-plus-draft.yaml via the GE
+#                    composition (openha-ge-draft.yaml); these are the
+#                    aggregated household outputs C, A.
+#   to_household   - prices the household block consumes (r, w, N);
+#                    in dolo-plus-draft.yaml these are declared as
+#                    `parameters` under the household-only scope
+#                    (bellman-excerpt.md section 13.4) and become
+#                    time-varying inputs once wired here.
+#   endogenous - solved by the aggregate system itself.
+# ------------------------------------------------------------
+symbols:
+  spaces:
+    Rpos: '@def R+'
+    Rany: '@def R'
+
+  exogenous:
+    eps:    '@in Rany'      # domestic monetary policy shock  (paper eq. (19))
+    B:      '@in Rpos'      # RoW intertemporal preference shifter (paper eq. (16))
+    C_star: '@in Rpos'      # RoW consumption; constant = C* under paper's RoW policy
+                            #   (paper eq. (16); steady state C_star = 1)
+
+  from_household:
+    C: '@in Rpos'           # aggregate consumption = integral c dD  (paper, section 1.2;
+                            #   the consumption functional E.1 is *implemented* by the
+                            #   household block, not re-stated here -- see note at E.1)
+    A: '@in Rpos'           # aggregate real assets = integral a^p dD (paper, section 1.2)
+
+  to_household:
+    r: '@in Rany'           # ex-ante real interest rate  (enters household twister)
+    w: '@in Rpos'           # real wage W/P               (enters household cash-on-hand)
+    N: '@in Rpos'           # hours = output (union-set)  (enters household cash-on-hand)
+
+  endogenous:
+    Y:      '@in Rpos'      # domestic output
+    P:      '@in Rpos'      # domestic CPI
+    P_H:    '@in Rpos'      # price of home good (domestic currency)
+    P_F:    '@in Rpos'      # price of foreign good (domestic currency)
+    P_Hs:   '@in Rpos'      # foreign-currency price of home good abroad (P_H_star)
+    Exch:   '@in Rpos'      # nominal exchange rate (price of foreign currency); 'E' reserved
+    Q:      '@in Rpos'      # real exchange rate
+    W:      '@in Rpos'      # nominal wage
+    r_star: '@in Rany'      # RoW ex-ante real rate
+    iota:   '@in Rany'      # domestic nominal rate
+    iota_s: '@in Rany'      # RoW nominal rate (iota_star)
+    pi:     '@in Rany'      # CPI inflation
+    pi_w:   '@in Rany'      # nominal wage inflation
+    d:      '@in Rpos'      # real dividend
+    p:      '@in Rpos'      # real stock price
+    nfa:    '@in Rany'      # net foreign assets
+    NX:     '@in Rany'      # real net exports
+
+  parameters:
+    # --- Aggregate-only structural parameters ---
+    # These are exactly the ones commented "NOT in household Bellman"
+    # in dolo-plus-draft.yaml calibration (lines 342-346). Calibration
+    # block at the foot of this file; paper Table 2 (benchmark column).
+    alpha:     '@in (0,1)'  # openness / import share          (paper Table 2)
+    eta:       '@in Rpos'   # domestic elasticity home<->foreign (paper, section 2.1)
+    gamma:     '@in Rpos'   # RoW elasticity home<->foreign      (paper eq. (12))
+    mu:        '@in Rpos'   # gross price markup                 (paper eq. (14))
+    mu_w:      '@in Rpos'   # wage markup (static)               (paper eq. (18))
+    theta_w:   '@in (0,1)'  # wage Calvo parameter               (paper Table 2)
+    kappa_w:   '@in Rpos'   # wage-PC slope; = (1-beta theta_w)(1-theta_w)/theta_w
+    beta:      '@in (0,1)'  # household discount factor (also in wage PC)
+    beta_star: '@in (0,1)'  # RoW discount factor; pins r_ss
+    varphi:    '@in Rpos'   # inverse Frisch (labour disutility v(N))
+    psi_N:     '@in Rpos'   # labour-disutility weight
+    sigma:     '@in Rpos'   # CRRA (enters u'(C) in wage PC)
+    r_ss:      '@in Rany'   # steady-state real rate = 1/beta_star - 1
+
+
+# ============================================================
+# Block A: Prices and Exchange Rate  (E.3-E.7)
+# ============================================================
+# Static price identities plus the (intertemporal) real-UIP arbitrage.
+# Inputs: iota, iota_s (from Block D), P_H (from Block B).
+# Outputs: P, P_F, P_Hs, Q, r (and r_star via UIP/RoW).
+# ------------------------------------------------------------
+blocks:
+- name: prices_fx
+  kind: block
+  inputs:  [P_H, Exch, iota, iota_s, pi, B]
+  outputs: [P, P_F, P_Hs, Q, r, r_star]
+  equations:
+    E.3_cpi: |
+      # CES consumer price index (paper eq. (4)).
+      P^(1 - eta) = alpha * P_F^(1 - eta) + (1 - alpha) * P_H^(1 - eta)
+    E.4_lop_import: |
+      # Law of one price, imports, perfect pass-through (paper eq. (17)).
+      P_F = Exch
+    E.5_lop_export: |
+      # Law of one price, exports (paper eq. (17)).
+      P_Hs = P_H / Exch
+    E.6_rer: |
+      # Real exchange rate (paper eq. (6)); P_star = 1 under RoW policy.
+      Q = Exch / P
+    E.7_uip: |
+      # Real uncovered interest parity (paper eq. (7)).
+      1 + r = (1 + r_star) * Q[+1] / Q
+    # Real-rate definitions tying nominal rates to inflation:
+    rdef_home: |
+      1 + r = (1 + iota) * P / P[+1]          # paper, section 1.3
+    rdef_row: |
+      1 + r_star = (1 + iota_s)               # P_star=1 => r_star = iota_star
+    # workaround: whether real-UIP (E.7) is a within-period or a
+    # between-period (twister-like) equation is one of the dolo-plus
+    # modelling choices flagged as open in bellman-excerpt.md section 13.1.
+    # Encoded here as a within-system equation over the sequence {Q_t};
+    # the Q[+1] lead is the forward-looking term. See section 13.5.
+
+
+# ============================================================
+# Block B: Firms, Production, Dividends  (E.8, E.10, E.13)
+# ============================================================
+# Constant-productivity production, constant-markup pricing, dividends.
+# Inputs: W (from Block C / wage PC), Y or N.
+# Outputs: P_H, Y(=N), d, and the real wage w = W/P consumed by household.
+# ------------------------------------------------------------
+- name: firms
+  kind: block
+  inputs:  [W, N, P, P_H, Y]
+  outputs: [P_H, Y, d, w]
+  equations:
+    E.8_pricing: |
+      # Monopolistic price setting at constant markup (paper eq. (14)).
+      P_H = mu * W
+    E.10_production: |
+      # Linear technology Y = N (paper eq. (13)).
+      Y = N
+    E.13_dividend: |
+      # Real dividends = profit share of real income (paper eqs. (15),(29)).
+      # Export currency-exposure term is zero under LOP (paper eq. (17)).
+      d = (1 - 1 / mu) * (P_H / P) * Y
+    real_wage: |
+      # Real wage consumed by the household block (paper eq. (28)):
+      #   (W/P) N = (1/mu) (P_H/P) Y. With Y=N this gives w = (1/mu)(P_H/P).
+      w = (1 / mu) * (P_H / P)
+
+
+# ============================================================
+# Block C: Wage Phillips Curve  (E.9)
+# ============================================================
+# Sticky nominal wages (Calvo union). Forward-looking in pi_w.
+# Inputs: N, w (=W/P), C (from household), pi_w[+1].
+# Output: pi_w, and the implied path of the nominal wage W.
+# ------------------------------------------------------------
+- name: wage_phillips
+  kind: block
+  inputs:  [N, w, C, pi_w, W]
+  outputs: [pi_w, W]
+  equations:
+    E.9_wage_pc: |
+      # Wage Phillips curve (paper eq. (18)).
+      #   v'(N) = psi_N * N^varphi          (labour disutility, paper eq. (2))
+      #   u'(C) = C^(-sigma)                (CRRA marginal utility)
+      pi_w = kappa_w * ( (psi_N * N^varphi) / ( (1 / mu_w) * w * C^(-sigma) ) - 1 )
+             + beta * pi_w[+1]
+    wage_inflation_def: |
+      # Definition of nominal wage inflation linking W across periods.
+      pi_w = W / W[-1] - 1
+
+
+# ============================================================
+# Block D: Monetary Rules  (E.11-E.12)
+# ============================================================
+# Baseline domestic rule = constant real rate + shock (paper eq. (19)).
+# RoW monetary policy sets P_star=1, C_star=C* (paper eq. (16)).
+# Inputs: eps, B (exogenous), pi[+1].
+# Outputs: iota, iota_s.
+# ------------------------------------------------------------
+- name: monetary
+  kind: block
+  inputs:  [eps, B, pi]
+  outputs: [iota, iota_s]
+  equations:
+    E.11_domestic_rule: |
+      # Constant-real-rate rule with monetary shock (paper eq. (19)).
+      # Equivalent reduced form: r = r_ss + eps.
+      iota = r_ss + pi[+1] + eps
+    E.12_row_monetary: |
+      # RoW monetary policy (paper eq. (16)); B is the preference shifter.
+      1 + iota_s = (1 / beta_star) * B / B[+1]
+    # workaround: the paper's alternative inertial Taylor rule (eq. (20))
+    # is a Section-5 extension; only the baseline rule (E.11) is encoded.
+    # See bellman-excerpt.md section 9.6 for the inertial-rule variant.
+
+
+# ============================================================
+# Block E: Goods Market Clearing  (E.2)  -- the international Keynesian cross
+# ============================================================
+# Domestic-goods market clearing after substituting demand aggregations,
+# LOP, and RoW policy (paper eq. (33)). This is the equation that, with
+# Blocks A+B and the household consumption functional, linearizes into the
+# international Keynesian cross of bellman-excerpt.md section 6.2.
+# Inputs: P_H, P, Exch, C (from household), C_star.
+# Output: residual that the GE solve drives to zero for the unknown {Y}.
+# ------------------------------------------------------------
+- name: goods_market
+  kind: block
+  inputs:  [Y, P_H, P, Exch, C, C_star]
+  outputs: [Y]
+  equations:
+    E.2_clearing: |
+      # Home-goods market clearing (paper eq. (21) reduced to eq. (33)):
+      #   domestic home-good demand + RoW demand for home good = output.
+      Y = (1 - alpha) * (P_H / P)^(-eta) * C
+          + alpha * (P_H / Exch)^(-gamma) * C_star
+
+
+# ============================================================
+# Block F: NFA, Current Account, Stock Pricing, Terminal  (E.14-E.16)
+# ============================================================
+# Net foreign assets law of motion, the no-arbitrage stock price, and
+# the equilibrium-selection terminal conditions.
+# Inputs: A (from household), p, d, r, P_H, P, Y, C.
+# Outputs: nfa, NX, p; plus the two terminal (boundary) conditions.
+# ------------------------------------------------------------
+- name: nfa_ca
+  kind: block
+  inputs:  [A, p, d, r, P_H, P, Y, C]
+  outputs: [nfa, NX, p]
+  equations:
+    NX_def: |
+      # Real net exports (paper, section 1.2).
+      NX = (P_H / P) * Y - C
+    E.14_nfa: |
+      # NFA definition and current-account identity (paper eqs. (22)-(23)).
+      nfa = A - p
+      nfa - nfa[-1] = NX + r[-1] * nfa[-1]
+    E.15_stock_pricing: |
+      # Real stock price = no-arbitrage present value (paper eq. (7), 2nd equality).
+      1 + r = (p[+1] + d[+1]) / p
+  terminal_conditions:
+    E.16_terminal: |
+      # Equilibrium-selection / transversality (paper, section 4.1).
+      #   nfa_infinity = 0   (zero long-run net foreign assets)
+      #   Q_infinity   = Q_ss = 1   (real exchange rate returns to steady state)
+      nfa[T] = 0
+      Q[T] = 1
+    # unresolved: horizon-end (T -> infinity) boundary conditions in a
+    # stationary infinite-horizon MIT-shock problem are not a canonical
+    # dolo-plus construct (same spec gap as the Benhabib terminal-boundary
+    # item). Encoded as `terminal_conditions` here; revisit when the spec
+    # adds a sequence-space boundary idiom. See bellman-excerpt.md section 13.5.
+
+
+# ============================================================
+# Consumption functional  (E.1) -- implemented by the household block
+# ============================================================
+# E.1 (paper Proposition 1):
+#   C_t = C_t( { (P_Hs/Ps) Y_s }_{s>=0}, { r_s }_{s>=0} )
+# is NOT re-stated as an aggregate-block equation: it IS the household
+# block (dolo-plus-draft.yaml), whose policy functions aggregated over
+# the distribution D_t produce C and A. The GE composition file
+# (openha-ge-draft.yaml) wires the household block in as the provider of
+# C (and the iMPC matrices M, M^r around the steady state; see
+# bellman-excerpt.md sections 5.2-5.3). Recorded here only so the E.* map
+# to section 7 is complete.
+consumption_functional:
+  E.1_provider: dolo-plus-draft.yaml      # household three-stage period
+  produces: [C, A]
+  consumes:  [r, w, N]                    # the to_household prices above
+  impc_matrices:                          # linearization objects (paper section 5)
+    M:   'partial C / partial ((P_H/P) Y)'    # intertemporal MPC matrix (paper eq. (A.67))
+    M_r: '(1 + r) * partial C / partial r'    # interest-rate Jacobian
+  assumption: 'M >= 0 (paper Assumption 1; maintained, not re-derived)'
+
+
+# ============================================================
+# GE unknowns and targets (sequence-space fixed point)
+# ============================================================
+# unresolved (SPECULATIVE): the precise partition of the GE solve into
+# `unknowns` (the sequences the solver iterates on) and `targets` (the
+# residuals driven to zero) is a sequence-space-Jacobian modelling choice
+# not yet canonical in dolo-plus (see block-level flag and
+# bellman-excerpt.md section 13.5). The partition below follows the
+# standard small-open-economy HANK convention: solve for the output and
+# price/exchange-rate paths that clear the home-goods market and satisfy
+# real UIP, taking the household consumption functional as given.
+# ------------------------------------------------------------
+unknowns:
+  - Y          # output path
+  - P_H        # home-good price path
+  - Exch       # nominal exchange-rate path
+  - W          # nominal wage path
+  - pi_w       # wage-inflation path
+
+targets:
+  - E.2_clearing       # home-goods market clears
+  - E.7_uip            # real UIP holds
+  - E.8_pricing        # firm pricing
+  - E.9_wage_pc        # wage Phillips curve
+  - E.16_terminal      # terminal conditions (nfa_inf=0, Q_inf=Q_ss)
+
+
+# ============================================================
+# Calibration (Paper Table 2, benchmark column)
+# ============================================================
+# Aggregate-only parameters (the household-block parameters live in
+# dolo-plus-draft.yaml). Values cross-checked against bellman-excerpt.md
+# section 10 and the "Aggregate parameters" comment block of
+# dolo-plus-draft.yaml (lines 342-346).
+# ============================================================
+calibration:
+  # --- Openness / demand elasticities ---
+  alpha:     0.40        # import share (Gali-Monacelli 2005)        [paper Table 2]
+  eta:       1.0         # domestic home<->foreign elasticity (benchmark; swept in figures)
+  gamma:     1.0         # RoW home<->foreign elasticity      (benchmark; swept in figures)
+  # note: chi = eta*(1-alpha) + gamma is the trade elasticity (paper eq. (36));
+  #       at eta=gamma=1 -> chi = 1*(0.6) + 1 = 1.6. The chi=1 neutrality
+  #       result (Prop. 5) corresponds to eta=gamma chosen so chi=1.
+
+  # --- Firms / wage setting ---
+  mu:        1.043       # gross price markup                         [paper Table 2]
+  mu_w:      1.0         # wage markup (static under union objective)  [paper eq. (18)]
+  theta_w:   0.938       # wage Calvo parameter                        [paper Table 2]
+  kappa_w:   0.00408     # = (1 - beta*theta_w)(1 - theta_w)/theta_w
+                         #   = (1 - 0.965*0.938)(1 - 0.938)/0.938
+                         #   = (0.09483)(0.062)/0.938 = 0.006268 ... see note below
+  # note: kappa_w is a derived parameter; the value above uses beta=0.965,
+  # theta_w=0.938. unresolved: whether kappa_w should be a free calibration
+  # entry or computed from (beta, theta_w) inside the block depends on the
+  # dolo-plus convention for derived parameters. Listed explicitly here and
+  # flagged; recompute if beta or theta_w change. (Arithmetic:
+  #   1 - 0.965*0.938 = 0.094830; 1 - 0.938 = 0.062;
+  #   0.094830 * 0.062 / 0.938 = 0.006268.)
+
+  # --- Preferences (shared with household block; repeated for the wage PC) ---
+  beta:      0.965       # household discount factor                  [paper Table 2]
+  beta_star: 0.990       # RoW discount factor; pins r_ss             [paper Table 2]
+  sigma:     1.0         # CRRA (log utility)                         [paper Table 2]
+  varphi:    2.0         # inverse Frisch                             [paper Table 2]
+  psi_N:     1.0         # labour-disutility weight (normalisation)   [paper eq. (2)]
+
+  # --- Steady-state real rate ---
+  r_ss:      0.01010     # = 1/beta_star - 1 = 1/0.990 - 1            [paper, section 5.2]
+
+  # --- Rest-of-world steady-state levels (normalisations) ---
+  C_star:    1.0         # RoW consumption C* (paper, section 4.2 normalisation)
+
+  # --- Steady-state values of endogenous variables (paper, section 4.2) ---
+  # All nominal/relative prices = 1, Q = 1, Y = N = C = 1, nfa = 0.
+  # These pin the point around which the MIT-shock transition is solved.
+  #   P_Hss = P_Fss = P_ss = P_Hs_ss = Exch_ss = Q_ss = 1
+  #   Y_ss = N_ss = C_ss = C_star = 1 ; nfa_ss = 0 ; r_ss as above
+  #   w_ss = 1/mu = 0.9588 ; d_ss = (1 - 1/mu) = 0.04123
+
+
+# ============================================================
+# (Open items / workarounds: flagged inline above, per CONTRIBUTING.md
+#  line 47, not collected here. Canonical cross-document record of the
+#  aggregate-YAML syntax workarounds: bellman-excerpt.md section 13.5.)
+# ============================================================

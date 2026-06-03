@@ -1,0 +1,174 @@
+# ============================================================
+# OpenHA — General-Equilibrium Composition
+# ============================================================
+# Paper: Auclert, Rognlie, Souchier, Straub (2024),
+#   "Exchange Rates and Monetary Policy with Heterogeneous Agents:
+#    Sizing up the Real Income Channel" (NBER WP 28872).
+#
+# Top-level file that WIRES the two block YAMLs into the full baseline
+# general equilibrium of paper sections 2-4:
+#
+#   dolo-plus-draft.yaml   household three-stage period  (provides C, A)
+#   aggregate-draft.yaml   aggregate / GE closure E.1-E.16 (provides r, w, N)
+#
+# The wiring contract is the one spelled out in bellman-excerpt.md
+# section 13.1 ("Wiring of dolo-plus-draft.yaml (household) and
+# aggregate-draft.yaml (aggregate) into a higher-level GE composition
+# file") and visualized in OpenHA-perch-graphs.md section 2.
+#
+# ------------------------------------------------------------
+# BLOCK-LEVEL SCOPE / SYNTAX FLAG (read before editing)
+# ------------------------------------------------------------
+# unresolved (SPECULATIVE block-level): dolo-plus has no canonical
+# syntax for composing a heterogeneous-agent household block and an
+# aggregate sequence-space block into a general-equilibrium fixed
+# point. This is the same spec gap recorded for aggregate-draft.yaml
+# and (one level down) for the Benhabib-Bisin-Luo cross-generational
+# composition in dolo-plus-dynasty.yaml. The `components`, `wiring`,
+# `equilibrium`, and `shocks` layout below is therefore SPECULATIVE:
+# keyword names may need renaming once a canonical sequence-space-
+# Jacobian (SSJ) composition idiom appears. The economics is final;
+# only the container syntax is provisional. Canonical record:
+# bellman-excerpt.md section 13.5.
+#
+# Notation: ASCII throughout (matches the two component YAMLs).
+# ============================================================
+
+name: openha_ge
+kind: ge-composition                    # SPECULATIVE container kind (see block flag)
+horizon: infinite-stationary            # MIT-shock transition around stochastic steady state
+
+
+# ============================================================
+# Components
+# ============================================================
+# The two block YAMLs, each treated as a sequence-space map.
+# ------------------------------------------------------------
+components:
+  household:
+    source: dolo-plus-draft.yaml
+    kind: heterogeneous-agent-block
+    description: |
+      Infinite-horizon stationary incomplete-markets household problem
+      (three-stage period shocks->cons->disc). Aggregating its policy
+      functions over the distribution D_t yields aggregate consumption C
+      and aggregate real assets A.
+    consumes: [r, w, N]                 # equilibrium prices (declared as
+                                        #   `parameters` in the household YAML
+                                        #   under household-only scope; become
+                                        #   time-varying inputs here -- see
+                                        #   bellman-excerpt.md section 13.4)
+    produces: [C, A]
+    linearization:                      # paper section 5 (the HARK bridge)
+      M:   'partial C / partial ((P_H/P) Y)'   # iMPC matrix (paper eq. (A.67))
+      M_r: '(1 + r) * partial C / partial r'   # interest-rate Jacobian
+      note: |
+        M and M_r are exactly the sequence-space-Jacobian objects HARK's
+        incomplete-markets consumption block already exposes; this is why
+        the household block is the natural unit for the Econ-ARK / HARK
+        cross-check (bellman-excerpt.md section 13.1).
+
+  aggregate:
+    source: aggregate-draft.yaml
+    kind: aggregate-block-system
+    description: |
+      Aggregate / GE closure: prices & exchange rate (Block A, E.3-E.7),
+      firms/production/dividends (Block B, E.8/E.10/E.13), wage Phillips
+      curve (Block C, E.9), monetary rules (Block D, E.11-E.12), home-goods
+      market clearing (Block E, E.2), NFA/current account/terminal (Block F,
+      E.14-E.16).
+    consumes: [C, A, eps, B, C_star]    # household outputs + exogenous shocks
+    produces: [r, w, N, Y, P, P_H, Q, Exch, W, pi_w, d, p, nfa, NX]
+
+
+# ============================================================
+# Wiring (the GE feedback loop)
+# ============================================================
+# The household and aggregate blocks form a fixed point:
+#   household:  (r, w, N) -> C, A
+#   aggregate:  (C, A)    -> r, w, N
+# closed by the exogenous MIT shocks.
+# ------------------------------------------------------------
+wiring:
+  household_to_aggregate:
+    # household aggregate consumption enters goods-market clearing (E.2)
+    # and net exports (NX in Block F); aggregate assets enter NFA (E.14).
+    - from: household.C
+      to:   aggregate.goods_market.E.2_clearing      # via input C
+    - from: household.C
+      to:   aggregate.nfa_ca.NX_def                  # via input C
+    - from: household.A
+      to:   aggregate.nfa_ca.E.14_nfa                # via input A
+  aggregate_to_household:
+    # aggregate block supplies the three equilibrium prices the household
+    # block consumes. r enters the household twister a_p[+1]=(1+r)*psi_out;
+    # w and N enter household cash-on-hand m = a_p + e'*w*N.
+    - from: aggregate.firms.real_wage                # w = (1/mu)(P_H/P)
+      to:   household.w
+    - from: aggregate.firms.E.10_production           # N (= Y)
+      to:   household.N
+    - from: aggregate.prices_fx.E.7_uip               # r (real rate via UIP/rule)
+      to:   household.r
+
+
+# ============================================================
+# Equilibrium definition (paper section 4.1)
+# ============================================================
+equilibrium:
+  description: |
+    Given exogenous sequences {B_t} (equivalently {iota_star_t}) and
+    monetary shocks {eps_t}, and an initial wealth distribution D_0, a
+    competitive equilibrium is household policies + distributions, prices,
+    and aggregate quantities such that: households optimise given prices;
+    the distribution evolves consistently with policies; firms optimise;
+    the home-goods market clears (E.2); and the equilibrium-selection rule
+    Q_infinity = Q_ss holds.
+  selection_rule: 'Q_infinity = Q_ss = 1 ; nfa_infinity = 0'   # paper section 4.1; E.16
+  # unresolved (SPECULATIVE): the joint household+aggregate fixed-point
+  # solve is the sequence-space-Jacobian GE algorithm (Auclert, Bardoczy,
+  # Rognlie, Straub 2021); dolo-plus has no canonical idiom for declaring
+  # it. The `unknowns`/`targets` partition lives in aggregate-draft.yaml.
+  # See bellman-excerpt.md section 13.5.
+
+
+# ============================================================
+# Exogenous driving processes (MIT shocks)
+# ============================================================
+shocks:
+  eps:
+    description: domestic monetary policy shock (paper eq. (19))
+    enters: aggregate.monetary.E.11_domestic_rule
+  B:
+    description: |
+      RoW intertemporal preference shifter (paper eq. (16)); drives the
+      foreign nominal/real rate iota_star and hence, via real UIP (E.7),
+      the real exchange rate Q. Under the constant-real-rate rule, Q_t = B_t
+      (paper eq. (30)).
+    enters: aggregate.monetary.E.12_row_monetary
+
+
+# ============================================================
+# Steady state (paper section 4.2)
+# ============================================================
+# The point around which the MIT-shock transition is linearized.
+# Cross-checked against aggregate-draft.yaml calibration and
+# dolo-plus-draft.yaml calibration.
+# ------------------------------------------------------------
+steady_state:
+  prices:     'P_H = P_F = P = P_Hs = Exch = Q = 1'   # all normalised to unity
+  quantities: 'Y = N = C = C_star = 1 ; nfa = 0'
+  rates:     'r = r_star = r_ss = 1/beta_star - 1 = 0.01010'
+  wage:      'w = 1/mu = 0.9588'
+  dividend:  'd = (1 - 1/mu) = 0.04123'
+  note: |
+    beta (household discount factor) is calibrated so the household block's
+    aggregate asset demand A clears the domestic asset market at r_ss given
+    the idiosyncratic income process. This calibration step is the only
+    fixed point that must be solved to *find* the steady state; the MIT-shock
+    transition is then a linear solve around it.
+
+
+# ============================================================
+# (Open items / workarounds flagged inline above per CONTRIBUTING.md
+#  line 47. Canonical cross-document record: bellman-excerpt.md section 13.5.)
+# ============================================================
